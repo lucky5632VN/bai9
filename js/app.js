@@ -3,7 +3,7 @@ const SUPABASE_URL = 'https://hzlhgicztcphkouvhqdc.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_AEJiMwKnp4djhU7KJ3UgZQ_2qyaJL_W'; 
 
 let supabaseClient = null;
-if (SUPABASE_URL !== 'YOUR_SUPABASE_URL') {
+if (SUPABASE_URL.includes('hzlhgicztc')) {
     const { createClient } = supabase;
     supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
@@ -19,6 +19,10 @@ let currentState = {
     timerInterval: null,
     violations: 0,
     startTime: null
+};
+
+let dashboardState = {
+    activeClass: 'all'
 };
 
 // --- Initialization ---
@@ -45,6 +49,8 @@ function initLogin() {
     const nameSelect = document.getElementById('name-select');
     const studentForm = document.getElementById('student-login-form');
     const teacherForm = document.getElementById('teacher-login-form');
+    const loginBtn = document.getElementById('login-btn');
+    const attemptWarning = document.getElementById('attempt-warning');
 
     classSelect.addEventListener('change', (e) => {
         const cls = e.target.value;
@@ -60,14 +66,43 @@ function initLogin() {
         } else {
             nameSelect.disabled = true;
         }
+        attemptWarning.classList.add('hidden');
+        loginBtn.disabled = false;
+    });
+
+    nameSelect.addEventListener('change', async () => {
+        const cls = classSelect.value;
+        const name = nameSelect.value;
+        if (cls && name && supabaseClient) {
+            loginBtn.disabled = true;
+            loginBtn.textContent = 'ĐANG KIỂM TRA...';
+            
+            const { data, error } = await supabaseClient
+                .from('quiz_results')
+                .select('id')
+                .eq('name', name)
+                .eq('class', cls);
+            
+            if (data && data.length > 0) {
+                attemptWarning.classList.remove('hidden');
+                loginBtn.textContent = 'ĐÃ HOÀN THÀNH';
+            } else {
+                attemptWarning.classList.add('hidden');
+                loginBtn.disabled = false;
+                loginBtn.textContent = 'VÀO PHÒNG THI';
+            }
+        }
     });
 
     studentForm.addEventListener('submit', (e) => {
         e.preventDefault();
+        if (loginBtn.disabled) return;
+        
         const cls = classSelect.value;
         const name = nameSelect.value;
         const pass = document.getElementById('student-password').value;
         const student = STUDENT_DATA[cls].find(s => s.name === name && s.password === pass);
+        
         if (student) {
             currentState.user = { type: 'student', data: { ...student, class: cls } };
             startQuiz();
@@ -104,11 +139,21 @@ function startQuiz() {
 
 function startTimer() {
     const timerText = document.getElementById('timer-text');
+    const timerPill = document.getElementById('quiz-timer');
     currentState.timerInterval = setInterval(() => {
         currentState.timeLeft--;
         const m = Math.floor(currentState.timeLeft / 60);
         const s = currentState.timeLeft % 60;
         timerText.textContent = `${m}:${s < 10 ? '0' : ''}${s}`;
+
+        // Visual urgency states
+        timerPill.classList.remove('warning', 'danger');
+        if (currentState.timeLeft <= 120) {
+            timerPill.classList.add('danger');   // last 2 min — red + pulse
+        } else if (currentState.timeLeft <= 300) {
+            timerPill.classList.add('warning');  // last 5 min — orange
+        }
+
         if (currentState.timeLeft <= 0) {
             clearInterval(currentState.timerInterval);
             submitQuiz();
@@ -118,109 +163,131 @@ function startTimer() {
 
 function renderNavigator() {
     const desktopNav = document.getElementById('desktop-navigator');
-    const mobileNav = document.getElementById('mobile-navigator');
-    
+    const mobileNav  = document.getElementById('mobile-navigator');
+
+    const makeDots = (questions, section) =>
+        questions.map(q => createNavDotHTML(q, section)).join('');
+
     const navContent = `
-        <div>
-            <div class="text-[10px] text-cyan-400 mb-3 font-bold">PHẦN I (0.25đ/câu)</div>
-            <div class="nav-grid">${QUIZ_DATA.part1.map(q => createNavDotHTML(q, 1)).join('')}</div>
+        <div style="margin-bottom:1rem;">
+            <div style="font-size:0.58rem;font-weight:800;color:#2563eb;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:0.4rem;padding-bottom:0.4rem;border-bottom:1px solid #eff6ff;">Phần I</div>
+            <div class="nav-grid">${makeDots(QUIZ_DATA.part1, 1)}</div>
         </div>
-        <div>
-            <div class="text-[10px] text-purple-400 mb-3 font-bold">PHẦN II (Đúng / Sai)</div>
-            <div class="nav-grid">${QUIZ_DATA.part2.map(q => createNavDotHTML(q, 2)).join('')}</div>
+        <div style="margin-bottom:1rem;">
+            <div style="font-size:0.58rem;font-weight:800;color:#7c3aed;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:0.4rem;padding-bottom:0.4rem;border-bottom:1px solid #f5f3ff;">Phần II</div>
+            <div class="nav-grid">${makeDots(QUIZ_DATA.part2, 2)}</div>
         </div>
-        <div>
-            <div class="text-[10px] text-orange-400 mb-3 font-bold">PHẦN III (Trả lời ngắn)</div>
-            <div class="nav-grid">${QUIZ_DATA.part3.map(q => createNavDotHTML(q, 3)).join('')}</div>
+        <div style="margin-bottom:0.25rem;">
+            <div style="font-size:0.58rem;font-weight:800;color:#ea580c;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:0.4rem;padding-bottom:0.4rem;border-bottom:1px solid #fff7ed;">Phần III</div>
+            <div class="nav-grid">${makeDots(QUIZ_DATA.part3, 3)}</div>
         </div>
     `;
-
-    desktopNav.innerHTML = navContent;
-    mobileNav.innerHTML = navContent;
+    if (desktopNav) desktopNav.innerHTML = navContent;
+    if (mobileNav)  mobileNav.innerHTML  = navContent;
 }
 
 function createNavDotHTML(q, section) {
-    const isCurrent = currentState.currentSection === section && currentState.currentQuestionId === q.id;
     let isAnswered = false;
     if (section === 1) isAnswered = !!currentState.answers.part1[q.id];
-    if (section === 2) isAnswered = currentState.answers.part2[q.id] && currentState.answers.part2[q.id].every(v => v !== null);
-    if (section === 3) isAnswered = currentState.answers.part3[q.id] && currentState.answers.part3[q.id].trim() !== '';
+    if (section === 2) isAnswered = currentState.answers.part2[q.id] && currentState.answers.part2[q.id].some(v => v !== null);
+    if (section === 3) isAnswered = !!(currentState.answers.part3[q.id] && currentState.answers.part3[q.id].trim());
 
-    let classes = 'nav-dot';
-    if (isCurrent) classes += ' active';
-    else if (isAnswered) classes += ' answered';
-
-    return `<div class="${classes}" onclick="jumpTo(${section}, ${q.id})">${q.id}</div>`;
+    const cls = isAnswered ? 'nav-dot answered' : 'nav-dot';
+    return `<div class="${cls}" onclick="jumpTo(${section}, ${q.id})">${q.id}</div>`;
 }
 
 window.jumpTo = (section, qId) => {
-    currentState.currentSection = section;
-    currentState.currentQuestionId = qId;
     closeDrawer();
-    renderQuestions(true);
+    const el = document.getElementById(`q-${section}-${qId}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 };
 
-function renderQuestions(shouldScroll = false) {
+function renderQuestions() {
     const container = document.getElementById('questions-container');
     container.innerHTML = '';
-    const section = currentState.currentSection;
-    const currentQuestions = section === 1 ? QUIZ_DATA.part1 : section === 2 ? QUIZ_DATA.part2 : QUIZ_DATA.part3;
 
-    currentQuestions.forEach(q => {
-        const isActive = q.id === currentState.currentQuestionId;
+    // ── Section divider helper ──
+    function makeDivider(label, color, textColor) {
+        const d = document.createElement('div');
+        d.style.cssText = `display:flex;align-items:center;gap:0.75rem;margin:2rem 0 1rem;`;
+        d.innerHTML = `
+            <div style="width:4px;height:32px;background:${color};border-radius:4px;flex-shrink:0;"></div>
+            <div>
+                <div style="font-family:'Orbitron',sans-serif;font-size:0.72rem;font-weight:800;color:#0f172a;letter-spacing:0.04em;">${label}</div>
+                <div style="font-size:0.6rem;color:${textColor};font-weight:700;letter-spacing:0.06em;text-transform:uppercase;margin-top:1px;">Kết quả sẽ được ghi nhận tự động</div>
+            </div>`;
+        return d;
+    }
+
+    // ── PART 1 ──
+    container.appendChild(makeDivider('Phần I — Trắc nghiệm (0.25 đ/câu)', 'linear-gradient(180deg,#2563eb,#60a5fa)', '#2563eb'));
+    QUIZ_DATA.part1.forEach(q => {
         const card = document.createElement('div');
-        card.className = `question-card glass-card ${isActive ? 'border-cyan-400' : ''}`;
-        card.id = `q-${section}-${q.id}`;
-        
-        if (section === 1) {
-            card.innerHTML = `
-                <div class="text-[10px] text-cyan-400 font-bold mb-4 uppercase tracking-widest">PHẦN I - CÂU ${q.id}</div>
-                <p class="text-md md:text-lg font-semibold mb-8 leading-relaxed">${q.question}</p>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    ${['A', 'B', 'C', 'D'].map((opt, i) => `
-                        <button class="opt-btn ${currentState.answers.part1[q.id] === opt ? 'selected' : ''}" onclick="selectP1(${q.id}, '${opt}')">
-                            <span class="inline-block w-8 font-sci font-bold">${opt}.</span> ${q.options[i]}
-                        </button>
-                    `).join('')}
-                </div>
-            `;
-        } else if (section === 2) {
-            card.innerHTML = `
-                <div class="text-[10px] text-purple-400 font-bold mb-4 uppercase tracking-widest">PHẦN II - CÂU ${q.id}</div>
-                <p class="text-md md:text-lg font-semibold mb-10 leading-relaxed">${q.question}</p>
-                <div class="space-y-4">
-                    ${q.subQuestions.map((sq, idx) => {
-                        const val = (currentState.answers.part2[q.id] || [])[idx];
-                        return `
-                        <div class="flex flex-col md:flex-row md:items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 gap-4">
-                            <span class="text-slate-300 text-sm flex-grow">${sq.text}</span>
-                            <div class="flex gap-2">
-                                <button class="px-5 py-2 rounded-xl text-xs font-bold border transition-all ${val === true ? 'bg-cyan-500 text-black border-cyan-500' : 'bg-white/5 border-white/10 text-slate-500'}" onclick="selectP2(${q.id}, ${idx}, true)">ĐÚNG</button>
-                                <button class="px-5 py-2 rounded-xl text-xs font-bold border transition-all ${val === false ? 'bg-purple-500 text-white border-purple-500' : 'bg-white/5 border-white/10 text-slate-500'}" onclick="selectP2(${q.id}, ${idx}, false)">SAI</button>
-                            </div>
-                        </div>
-                        `;
-                    }).join('')}
-                </div>
-            `;
-        } else {
-            card.innerHTML = `
-                <div class="text-[10px] text-orange-400 font-bold mb-4 uppercase tracking-widest">PHẦN III - CÂU ${q.id}</div>
-                <p class="text-md md:text-lg font-semibold mb-8 leading-relaxed">${q.question}</p>
-                <div class="relative">
-                    <input type="text" class="w-full bg-white/5 border border-white/10 p-5 rounded-2xl text-white outline-none focus:border-orange-400 transition-all font-bold" 
-                           placeholder="Nhập đáp án..." value="${currentState.answers.part3[q.id] || ''}" 
-                           onchange="selectP3(${q.id}, this.value)">
-                </div>
-            `;
-        }
+        card.className = 'question-card glass-card';
+        card.id = `q-1-${q.id}`;
+        card.innerHTML = `
+            <div style="font-size:0.62rem;color:#2563eb;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:1rem;padding-bottom:0.75rem;border-bottom:1px solid #eff6ff;">
+                Câu ${q.id}
+            </div>
+            <p style="font-size:1rem;font-weight:700;color:#1e293b;margin-bottom:1.5rem;line-height:1.7;">${q.question}</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
+                ${['A','B','C','D'].map((opt, i) => `
+                    <button class="opt-btn ${currentState.answers.part1[q.id] === opt ? 'selected' : ''}" onclick="selectP1(${q.id}, '${opt}')">
+                        <span style="font-family:'Orbitron',sans-serif;font-weight:800;opacity:0.5;margin-right:0.5rem;font-size:0.75rem;">${opt}.</span>${q.options[i]}
+                    </button>`).join('')}
+            </div>`;
         container.appendChild(card);
-        if (isActive && shouldScroll) setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
     });
 
-    updateProgress();
-    updateNavButtons();
+    // ── PART 2 ──
+    container.appendChild(makeDivider('Phần II — Đúng / Sai (0.1  → 1.0 đ/câu)', 'linear-gradient(180deg,#7c3aed,#a78bfa)', '#7c3aed'));
+    QUIZ_DATA.part2.forEach(q => {
+        const card = document.createElement('div');
+        card.className = 'question-card glass-card';
+        card.id = `q-2-${q.id}`;
+        card.innerHTML = `
+            <div style="font-size:0.62rem;color:#7c3aed;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:1rem;padding-bottom:0.75rem;border-bottom:1px solid #f5f3ff;">
+                Câu ${q.id}
+            </div>
+            <p style="font-size:1rem;font-weight:700;color:#1e293b;margin-bottom:1.5rem;line-height:1.7;">${q.question}</p>
+            <div style="display:flex;flex-direction:column;gap:0.625rem;">
+                ${q.subQuestions.map((sq, idx) => {
+                    const val = (currentState.answers.part2[q.id] || [])[idx];
+                    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:0.875rem 1rem;background:#f8fafc;border-radius:0.75rem;border:1px solid #e2e8f0;gap:1rem;">
+                        <span style="color:#334155;font-size:0.875rem;font-weight:500;flex:1;">${sq.text}</span>
+                        <div style="display:flex;gap:0.4rem;flex-shrink:0;">
+                            <button style="padding:0.35rem 0.875rem;border-radius:0.5rem;font-size:0.7rem;font-weight:800;border:1.5px solid;transition:all 0.18s;cursor:pointer;${val===true ? 'background:#2563eb;color:#fff;border-color:#2563eb;' : 'background:#fff;color:#94a3b8;border-color:#e2e8f0;'}" onclick="selectP2(${q.id},${idx},true)">ĐÚNG</button>
+                            <button style="padding:0.35rem 0.875rem;border-radius:0.5rem;font-size:0.7rem;font-weight:800;border:1.5px solid;transition:all 0.18s;cursor:pointer;${val===false ? 'background:#7c3aed;color:#fff;border-color:#7c3aed;' : 'background:#fff;color:#94a3b8;border-color:#e2e8f0;'}" onclick="selectP2(${q.id},${idx},false)">SAI</button>
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>`;
+        container.appendChild(card);
+    });
+
+    // ── PART 3 ──
+    container.appendChild(makeDivider('Phần III — Tự luận ngắn (0.25 đ/câu)', 'linear-gradient(180deg,#ea580c,#fb923c)', '#ea580c'));
+    QUIZ_DATA.part3.forEach(q => {
+        const card = document.createElement('div');
+        card.className = 'question-card glass-card';
+        card.id = `q-3-${q.id}`;
+        card.innerHTML = `
+            <div style="font-size:0.62rem;color:#ea580c;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:1rem;padding-bottom:0.75rem;border-bottom:1px solid #fff7ed;">
+                Câu ${q.id}
+            </div>
+            <p style="font-size:1rem;font-weight:700;color:#1e293b;margin-bottom:1.5rem;line-height:1.7;">${q.question}</p>
+            <input type="text" 
+                style="width:100%;max-width:320px;background:#fff;border:2px solid #e2e8f0;padding:0.75rem 1rem;border-radius:0.75rem;color:#1e293b;font-weight:700;font-size:0.95rem;outline:none;transition:border-color 0.2s;" 
+                placeholder="Nhập số..." 
+                value="${currentState.answers.part3[q.id] || ''}" 
+                onchange="selectP3(${q.id}, this.value)"
+                onfocus="this.style.borderColor='#ea580c'"
+                onblur="this.style.borderColor='#e2e8f0'">`;
+        container.appendChild(card);
+    });
+
     renderNavigator();
+    lucide.createIcons();
 }
 
 function updateProgress() {
@@ -241,9 +308,8 @@ window.selectP2 = (qId, idx, val) => {
     currentState.answers.part2[qId][idx] = val;
     renderQuestions();
 };
-window.selectP3 = (qId, val) => { currentState.answers.part3[qId] = val; updateProgress(); renderNavigator(); };
+window.selectP3 = (qId, val) => { currentState.answers.part3[qId] = val; renderQuestions(); };
 
-// --- Mobile Navigation Logic ---
 function setupMobileNav() {
     const toggle = document.getElementById('mobile-nav-toggle');
     const drawer = document.getElementById('nav-drawer');
@@ -260,58 +326,104 @@ function closeDrawer() {
     document.getElementById('nav-overlay').classList.remove('open');
 }
 
-// --- Leaderboard Sync ---
+// --- Leaderboard & Persistence ---
 async function fetchResults() {
-    if (!supabaseClient) {
-        return JSON.parse(localStorage.getItem('quiz_results') || '[]');
-    }
+    if (!supabaseClient) return [];
     const { data, error } = await supabaseClient
         .from('quiz_results')
         .select('*')
         .order('score', { ascending: false })
         .order('timestamp', { ascending: true });
-    
-    if (error) {
-        console.error('Database error:', error);
-        return JSON.parse(localStorage.getItem('quiz_results') || '[]');
-    }
-    return data;
+    return error ? [] : data;
 }
 
 async function showLeaderboard() {
     switchView('leaderboard');
-    const body = document.getElementById('leaderboard-body');
-    body.innerHTML = '<tr><td colspan="4" class="p-10 text-center text-muted italic">Đang tải dữ liệu...</td></tr>';
-    
+    lucide.createIcons();
+
+    const body    = document.getElementById('leaderboard-body');
+    const podium  = document.getElementById('lb-podium');
+    const counter = document.getElementById('lb-total-count');
+
+    body.innerHTML   = '<tr><td colspan="5" style="padding:3rem;text-align:center;color:#94a3b8;font-weight:600;">Đang tải dữ liệu...</td></tr>';
+    if (podium)  podium.innerHTML  = '';
+    if (counter) counter.textContent = '...';
+
     const results = await fetchResults();
+
+    if (counter) counter.textContent = `${results.length} thí sinh`;
+
+    // ── Podium (top 3) ──
+    if (podium) {
+        if (results.length === 0) {
+            podium.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:2rem;font-size:0.85rem;">Chưa có dữ liệu xếp hạng.</div>';
+        } else {
+            // Display order: 2nd | 1st | 3rd  (classic podium layout)
+            const order = [results[1], results[0], results[2]].filter(Boolean);
+            const rankMap = { 0: 2, 1: 1, 2: 3 };  // index in order → actual rank
+            const scoreClass = ['silver', 'gold', 'bronze'];
+            const rankBadgeClass = ['lb-rank-2', 'lb-rank-1', 'lb-rank-3'];
+            const rankLabel = ['2', '1', '3'];
+
+            order.forEach((res, i) => {
+                const actualRank = (results.indexOf(res) + 1);
+                const sc = actualRank === 1 ? 'gold' : actualRank === 2 ? 'silver' : 'bronze';
+                const badgeCls = actualRank === 1 ? 'lb-rank-1' : actualRank === 2 ? 'lb-rank-2' : 'lb-rank-3';
+                const card = document.createElement('div');
+                card.className = `lb-podium-card rank-${actualRank}`;
+                card.innerHTML = `
+                    <div class="lb-rank-badge ${badgeCls}">${actualRank}</div>
+                    <div class="lb-podium-name">${res.name}</div>
+                    <div class="lb-podium-class">${res.class}</div>
+                    <div class="lb-podium-score-bar">
+                        <div class="lb-podium-score ${sc}">${res.score.toFixed(2)}</div>
+                        <div class="lb-podium-score-label">Điểm số</div>
+                    </div>
+                `;
+                podium.appendChild(card);
+            });
+        }
+    }
+
+    // ── Full Rankings Table ──
     body.innerHTML = '';
-    
     if (results.length === 0) {
-        body.innerHTML = '<tr><td colspan="4" class="p-10 text-center text-muted italic">Chưa có kết quả nào</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" style="padding:3rem;text-align:center;color:#94a3b8;">Chưa có bài nộp nào.</td></tr>';
         return;
     }
 
-    results.slice(0, 50).forEach((res, index) => {
-        const rank = index + 1;
-        let rankClass = 'rank-other';
-        if (rank === 1) rankClass = 'rank-1';
-        else if (rank === 2) rankClass = 'rank-2';
-        else if (rank === 3) rankClass = 'rank-3';
+    const rankEmoji = ['🥇', '🥈', '🥉'];
+    const topClass  = ['lb-top1', 'lb-top2', 'lb-top3'];
 
+    results.forEach((res, index) => {
+        const rank = index + 1;
         const row = document.createElement('tr');
+        if (rank <= 3) row.className = topClass[rank - 1];
+
+        const rankDisplay = rank <= 3
+            ? `<span style="font-size:1.1rem;">${rankEmoji[rank-1]}</span>`
+            : `<span style="font-family:'Orbitron',sans-serif;font-weight:800;font-size:0.8rem;color:#94a3b8;">${rank}</span>`;
+
+        const scoreColor = res.score >= 8 ? '#16a34a' : res.score >= 5 ? '#2563eb' : '#dc2626';
+
         row.innerHTML = `
-            <td class="p-6">
-                <div class="rank-badge ${rankClass}">${rank}</div>
+            <td style="text-align:center;">${rankDisplay}</td>
+            <td>
+                <div style="font-weight:700;color:#1e293b;font-size:0.9rem;">${res.name}</div>
             </td>
-            <td class="p-6">
-                <div class="font-bold text-white">${res.name}</div>
-                <div class="text-[10px] text-muted uppercase">${res.class}</div>
+            <td>
+                <span style="background:#eff6ff;color:#2563eb;font-size:0.65rem;font-weight:800;padding:0.2rem 0.6rem;border-radius:999px;text-transform:uppercase;">
+                    ${res.class}
+                </span>
             </td>
-            <td class="p-6 text-center">
-                <span class="score-pill">${res.score.toFixed(2)}</span>
+            <td style="text-align:center;">
+                <span style="font-family:'Orbitron',sans-serif;font-weight:800;font-size:1rem;color:${scoreColor};">
+                    ${res.score.toFixed(2)}
+                </span>
             </td>
-            <td class="p-6 text-right text-muted text-xs">
-                ${new Date(res.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            <td style="text-align:right;font-size:0.72rem;color:#94a3b8;font-weight:600;">
+                ${new Date(res.timestamp).toLocaleDateString('vi-VN')}<br>
+                <span style="font-size:0.65rem;">${new Date(res.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
             </td>
         `;
         body.appendChild(row);
@@ -319,63 +431,38 @@ async function showLeaderboard() {
 }
 window.showLeaderboard = showLeaderboard;
 
-// --- Prev/Next Buttons ---
 function updateNavButtons() {
-    const prev = document.getElementById('prev-btn');
-    const next = document.getElementById('next-btn');
-    const submit = document.getElementById('submit-btn');
-    if (!prev) return;
-
-    const s = currentState.currentSection;
-    const qid = currentState.currentQuestionId;
-    
-    prev.classList.toggle('hidden', s === 1 && qid === 1);
-    next.classList.toggle('hidden', s === 3 && qid === QUIZ_DATA.part3.length);
-    submit.classList.toggle('hidden', !(s === 3 && qid === QUIZ_DATA.part3.length));
+    // Legacy function - hidden in continuous scroll layout
 }
 
-document.getElementById('next-btn').onclick = () => {
-    const s = currentState.currentSection;
-    const qid = currentState.currentQuestionId;
-    if (qid < QUIZ_DATA[`part${s}`].length) currentState.currentQuestionId++;
-    else if (s < 3) { currentState.currentSection++; currentState.currentQuestionId = 1; }
-    renderQuestions(true);
-};
-
-document.getElementById('prev-btn').onclick = () => {
-    const s = currentState.currentSection;
-    const qid = currentState.currentQuestionId;
-    if (qid > 1) currentState.currentQuestionId--;
-    else if (s > 1) { currentState.currentSection--; currentState.currentQuestionId = QUIZ_DATA[`part${currentState.currentSection}`].length; }
-    renderQuestions(true);
-};
-
-document.getElementById('submit-btn').onclick = () => {
-    const allP1 = QUIZ_DATA.part1.every(q => currentState.answers.part1[q.id]);
-    const allP2 = QUIZ_DATA.part2.every(q => currentState.answers.part2[q.id] && currentState.answers.part2[q.id].every(v => v !== null));
-    const allP3 = QUIZ_DATA.part3.every(q => currentState.answers.part3[q.id] && currentState.answers.part3[q.id].trim() !== '');
-
-    if (allP1 && allP2 && allP3) { if (confirm('Xác nhận nộp bài?')) submitQuiz(); }
-    else alert('Vui lòng hoàn thành mọi câu hỏi!');
-};
-
-// --- Results & Dashboard ---
+// --- Statistics & Submission ---
 async function submitQuiz() {
     clearInterval(currentState.timerInterval);
-    let score = 0;
-    QUIZ_DATA.part1.forEach(q => { if (currentState.answers.part1[q.id] === q.answer) score += 0.25; });
+    
+    let scoreP1 = 0;
+    let scoreP2 = 0;
+    let scoreP3 = 0;
+
+    QUIZ_DATA.part1.forEach(q => { if (currentState.answers.part1[q.id] === q.answer) scoreP1 += 0.25; });
+    
     QUIZ_DATA.part2.forEach(q => {
         let count = 0;
         q.subQuestions.forEach((sq, i) => { if (currentState.answers.part2[q.id] && currentState.answers.part2[q.id][i] === sq.answer) count++; });
-        if (count === 1) score += 0.1; else if (count === 2) score += 0.25; else if (count === 3) score += 0.5; else if (count === 4) score += 1.0;
+        if (count === 1) scoreP2 += 0.1; 
+        else if (count === 2) scoreP2 += 0.25; 
+        else if (count === 3) scoreP2 += 0.5; 
+        else if (count === 4) scoreP2 += 1.0;
     });
+
     QUIZ_DATA.part3.forEach(q => {
         const studentAns = (currentState.answers.part3[q.id] || '').toString().trim().replace(',', '.');
         const correctAns = q.answer.toString().trim().replace(',', '.');
-        if (parseFloat(studentAns) === parseFloat(correctAns)) score += 0.25;
+        if (studentAns && !isNaN(studentAns) && parseFloat(studentAns) === parseFloat(correctAns)) scoreP3 += 0.25;
     });
 
-    const final = Math.round(score * 100) / 100;
+    const final = Math.round((scoreP1 + scoreP2 + scoreP3) * 100) / 100;
+    
+    // Update Result UI
     document.getElementById('final-score').textContent = final.toFixed(2);
     document.getElementById('final-feedback').textContent = final >= 8 ? "XUẤT SẮC" : final >= 5 ? "ĐẠT YÊU CẦU" : "CẦN CỐ GẮNG";
     
@@ -383,22 +470,214 @@ async function submitQuiz() {
         name: currentState.user.data.name, 
         class: currentState.user.data.class, 
         score: final, 
+        score_p1: scoreP1,
+        score_p2: scoreP2,
+        score_p3: scoreP3,
         violations: currentState.violations, 
         timestamp: new Date().toISOString() 
     };
 
-    // Save to Local
-    const hist = JSON.parse(localStorage.getItem('quiz_results') || '[]');
-    hist.push(resultObj);
-    localStorage.setItem('quiz_results', JSON.stringify(hist));
+    // 1. Always save to LocalStorage (Fallback)
+    const localHistory = JSON.parse(localStorage.getItem('quiz_local_results') || '[]');
+    localHistory.push(resultObj);
+    localStorage.setItem('quiz_local_results', JSON.stringify(localHistory));
 
-    // Save to Cloud
+    // 2. Try saving to Supabase
     if (supabaseClient) {
-        const { error } = await supabaseClient.from('quiz_results').insert([resultObj]);
-        if (error) console.error('Cloud Save Error:', error);
+        try {
+            const { error } = await supabaseClient.from('quiz_results').insert([resultObj]);
+            if (error) {
+                console.error("LỗI Supabase:", error);
+                alert("Lưu điểm lên Máy chủ thất bại! (Bản lưu gốc vẫn được giữ trên máy này). LỗI: " + error.message);
+            } else {
+                console.log("Nộp bài thành công!");
+            }
+        } catch (err) {
+            console.error("Lỗi hệ thống:", err);
+            alert("Đã xảy ra lỗi khi nộp bài. Tuy nhiên điểm của bạn đã được lưu tạm trên máy này.");
+        }
     }
     
     switchView('result');
+}
+
+// --- Dashboard Analytics ---
+let mainChart = null;
+
+async function initDashboard() {
+    switchView('dashboard');
+    updateDashboard();
+    setInterval(updateDashboard, 15000);
+}
+
+window.setDashboardClass = (cls) => {
+    dashboardState.activeClass = cls;
+    // Update sidebar nav active state
+    document.querySelectorAll('.admin-nav-item').forEach(t => t.classList.remove('active'));
+    document.getElementById(`tab-${cls}`).classList.add('active');
+    updateDashboard();
+};
+
+async function updateDashboard() {
+    const rawHistory = await fetchResults();
+    const activeClass = dashboardState.activeClass;
+    
+    // Filter by class
+    const history = activeClass === 'all' 
+        ? rawHistory 
+        : rawHistory.filter(h => h.class === activeClass);
+
+    // Get target population count
+    let totalPossible = 0;
+    if (activeClass === 'all') {
+        totalPossible = STUDENT_DATA["11A1"].length + STUDENT_DATA["11A5"].length;
+    } else {
+        totalPossible = STUDENT_DATA[activeClass].length;
+    }
+
+    document.getElementById('kpi-total').textContent = `${history.length}/${totalPossible}`;
+    document.getElementById('kpi-rate').textContent = `${(history.length/totalPossible*100).toFixed(1)}% Hoàn thành`;
+    document.getElementById('count-submitted').textContent = history.length;
+    
+    if (history.length > 0) {
+        const scores = history.map(h => h.score);
+        document.getElementById('kpi-max').textContent = Math.max(...scores).toFixed(2);
+        document.getElementById('kpi-min').textContent = Math.min(...scores).toFixed(2);
+        document.getElementById('kpi-avg').textContent = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2);
+    } else {
+        document.getElementById('kpi-max').textContent = "0.0";
+        document.getElementById('kpi-min').textContent = "0.0";
+        document.getElementById('kpi-avg').textContent = "0.0";
+    }
+
+    renderCharts(history);
+    renderHistoryTable(history);
+    renderActivityFeed(history);
+    renderMissingStudents(rawHistory, activeClass);
+}
+
+function renderCharts(history) {
+    const dist = Array(11).fill(0);
+    history.forEach(h => {
+        const idx = Math.min(Math.floor(h.score), 10);
+        dist[idx]++;
+    });
+    
+    const ctx1 = document.getElementById('score-chart').getContext('2d');
+    if (mainChart) mainChart.destroy();
+    mainChart = new Chart(ctx1, {
+        type: 'bar',
+        data: {
+            labels: ['0-1', '1-2', '2-3', '3-4', '4-5', '5-6', '6-7', '7-8', '8-9', '9-10', '10'],
+            datasets: [{ 
+                label: 'Số học sinh', 
+                data: dist, 
+                backgroundColor: 'rgba(37, 99, 235, 0.6)', 
+                borderColor: '#2563eb', 
+                borderWidth: 2,
+                borderRadius: 8
+            }]
+        },
+        options: { 
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, ticks: { precision: 0 } }, x: { grid: { display: false } } }
+        }
+    });
+}
+
+function renderHistoryTable(history) {
+    const tbody = document.querySelector('#history-table tbody');
+    tbody.innerHTML = history.length === 0 
+        ? '<tr><td colspan="4" class="p-10 text-center text-muted italic">Chưa có bài nộp</td></tr>'
+        : '';
+        
+    [...history].reverse().slice(0, 50).forEach(h => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td class="p-5 text-muted font-bold text-xs">${new Date(h.timestamp).toLocaleTimeString('vi-VN')}</td>
+            <td class="p-5">
+                <div class="font-bold text-navy">${h.name}</div>
+                <div class="text-[9px] text-blue-600 font-bold uppercase">${h.class}</div>
+            </td>
+            <td class="p-5 text-center">
+                <span class="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded font-bold">${(h.score_p1 || 0).toFixed(2)}</span>
+            </td>
+            <td class="p-5 text-center">
+                <span class="text-[10px] bg-purple-50 text-purple-600 px-2 py-1 rounded font-bold">${(h.score_p2 || 0).toFixed(2)}</span>
+            </td>
+            <td class="p-5 text-center">
+                <span class="text-[10px] bg-orange-50 text-orange-600 px-2 py-1 rounded font-bold">${(h.score_p3 || 0).toFixed(2)}</span>
+            </td>
+            <td class="p-5 text-center">
+                <span class="bg-blue-600 text-white px-3 py-1 rounded-lg font-bold font-sci text-[11px] shadow-sm">${(h.score || 0).toFixed(2)}</span>
+            </td>
+            <td class="p-5 text-center font-bold ${h.violations > 0 ? 'text-red-500' : 'text-slate-300'}">${h.violations}</td>
+            <td class="p-5 text-right">
+                <button onclick="deleteResultById('${h.id}', '${h.name}')" 
+                        class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors border-none bg-transparent cursor-pointer"
+                        title="Xoá kết quả này">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+    lucide.createIcons();
+}
+
+function renderActivityFeed(history) {
+    const feed = document.getElementById('live-activity');
+    feed.innerHTML = '';
+    if (history.length === 0) {
+        feed.innerHTML = '<div style="padding:1rem;font-size:0.75rem;color:#94a3b8;text-align:center;">Chưa có hoạt động</div>';
+        return;
+    }
+    history.slice(-8).reverse().forEach(h => {
+        const item = document.createElement('div');
+        item.style.cssText = 'display:flex;align-items:center;gap:0.6rem;padding:0.5rem 0.75rem;background:#f8fafc;border-radius:0.6rem;border:1px solid #e2e8f0;';
+        item.innerHTML = `
+            <div style="width:36px;height:36px;border-radius:0.5rem;background:#1e40af;color:#fff;display:flex;align-items:center;justify-content:center;font-family:'Orbitron',sans-serif;font-weight:800;font-size:0.7rem;flex-shrink:0;">${h.score.toFixed(1)}</div>
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:0.75rem;font-weight:700;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${h.name}</div>
+                <div style="font-size:0.65rem;color:#2563eb;font-weight:700;text-transform:uppercase;">${h.class} &middot; ${new Date(h.timestamp).toLocaleTimeString('vi-VN', {hour:'2-digit',minute:'2-digit'})}</div>
+            </div>
+        `;
+        feed.appendChild(item);
+    });
+}
+
+function renderMissingStudents(rawResults, activeClass) {
+    const container = document.getElementById('missing-list');
+    const submittedNames = new Set(rawResults.map(r => `${r.class}-${r.name}`));
+    
+    let targetStudents = [];
+    if (activeClass === 'all') {
+        targetStudents = [...STUDENT_DATA["11A1"].map(s => ({...s, class: "11A1"})), 
+                          ...STUDENT_DATA["11A5"].map(s => ({...s, class: "11A5"}))];
+    } else {
+        targetStudents = STUDENT_DATA[activeClass].map(s => ({...s, class: activeClass}));
+    }
+
+    const missing = targetStudents.filter(s => !submittedNames.has(`${s.class}-${s.name}`));
+    document.getElementById('count-missing').textContent = missing.length;
+    
+    container.innerHTML = missing.length === 0 
+        ? '<div class="p-4 text-center text-green-600 font-bold text-xs">🎉 Đã hoàn thành 100%</div>' 
+        : '';
+
+    missing.forEach(s => {
+        const item = document.createElement('div');
+        item.className = 'missing-item';
+        item.innerHTML = `
+            <div>
+                <div class="text-[11px] font-bold text-navy">${s.name}</div>
+                <div class="text-[8px] text-muted font-bold">${s.class}</div>
+            </div>
+            <div class="text-[9px] font-bold text-orange-500 uppercase">Chưa làm</div>
+        `;
+        container.appendChild(item);
+    });
 }
 
 // --- Anti-Cheat ---
@@ -412,8 +691,6 @@ function setupAntiCheat() {
             else showAlert(`CẢNH BÁO: Không được rời khỏi tab thi! (${currentState.violations}/3)`);
         }
     });
-    document.addEventListener('contextmenu', e => e.preventDefault());
-    document.addEventListener('copy', e => e.preventDefault());
 }
 
 function showAlert(msg) {
@@ -421,55 +698,73 @@ function showAlert(msg) {
     document.getElementById('alert-modal').classList.remove('hidden');
 }
 document.getElementById('alert-btn').onclick = () => document.getElementById('alert-modal').classList.add('hidden');
+document.getElementById('logout-btn').onclick = () => location.reload();
 
-// --- Dashboard ---
-let myChart = null;
-async function initDashboard() {
-    switchView('dashboard');
-    updateDashboard();
-    setInterval(updateDashboard, 10000);
-}
-
-async function updateDashboard() {
-    const history = await fetchResults();
-    document.getElementById('kpi-total').textContent = `${history.length}/110`;
-    document.getElementById('kpi-rate').textContent = `${(history.length/110*100).toFixed(1)}% tham gia`;
-    
-    if (history.length > 0) {
-        const scores = history.map(h => h.score);
-        document.getElementById('kpi-avg').textContent = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(2);
-        document.getElementById('kpi-violation').textContent = (history.reduce((a, b) => a + b.violations, 0) / history.length).toFixed(1);
+// --- Administrative Tools ---
+async function deleteResultsByClass(cls) {
+    if (!supabaseClient) {
+        alert("Supabase chưa được kết nối. Không thể xoá dữ liệu.");
+        return;
     }
 
-    const dist = Array(11).fill(0);
-    history.forEach(h => dist[Math.floor(h.score)]++);
-    
-    const ctx = document.getElementById('score-chart').getContext('2d');
-    if (myChart) myChart.destroy();
-    myChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
-            datasets: [{ label: 'Học sinh', data: dist, backgroundColor: 'rgba(34, 211, 238, 0.4)', borderColor: '#22d3ee', borderWidth: 1, borderRadius: 6 }]
-        },
-        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } }, plugins: { legend: { display: false } } }
-    });
+    const confirm1 = confirm(`CẢNH BÁO: Hành động này sẽ xoá TOÀN BỘ dữ liệu bài nộp của lớp ${cls}. Bạn có chắc chắn muốn tiếp tục?`);
+    if (!confirm1) return;
 
-    const tbody = document.querySelector('#history-table tbody');
-    tbody.innerHTML = '';
-    [...history].reverse().slice(0, 30).forEach(h => {
-        const row = document.createElement('tr');
-        row.innerHTML = `<td class="p-4 md:p-6 text-muted">${new Date(h.timestamp).toLocaleTimeString()}</td><td class="p-4 md:p-6 font-bold truncate max-w-[150px]">${h.class} - ${h.name}</td><td class="p-4 md:p-6 font-sci text-cyan-400">${h.score.toFixed(2)}</td><td class="p-4 md:p-6 text-orange-400 font-bold">${h.violations}</td>`;
-        tbody.appendChild(row);
-    });
+    const confirm2 = prompt(`Để xác nhận, vui lòng nhập chính xác tên lớp (${cls}) vào ô bên dưới:`);
+    if (confirm2 !== cls) {
+        alert("Xác nhận không khớp. Hủy bỏ lệnh xoá.");
+        return;
+    }
 
-    const live = document.getElementById('live-activity');
-    live.innerHTML = '';
-    history.slice(-5).reverse().forEach(h => {
-        const item = document.createElement('div');
-        item.className = 'flex items-center gap-3 p-3 bg-white/5 rounded-xl border border-white/5';
-        item.innerHTML = `<div class="w-8 h-8 rounded-full bg-cyan-400/20 text-cyan-400 flex items-center justify-center font-bold text-xs">${h.score.toFixed(0)}</div><div><p class="text-xs font-bold text-white">${h.name}</p><p class="text-[9px] text-muted">${h.class} • ${new Date(h.timestamp).toLocaleTimeString()}</p></div>`;
-        live.appendChild(item);
-    });
+    try {
+        const { error, status } = await supabaseClient
+            .from('quiz_results')
+            .delete()
+            .eq('class', cls);
+
+        if (error) {
+            console.error("Lỗi Xoá Lớp:", error);
+            alert(`Lỗi Server (${error.code}): ${error.message}\n\nHãy kiểm tra xem RLS Policy trên Supabase đã cho phép quyền DELETE cho role 'anon' chưa.`);
+        } else if (status === 403 || status === 401) {
+             alert("Lỗi 403: Supabase từ chối lệnh Xoá. Bạn cần cấu hình Policy trên bảng 'quiz_results' để cho phép vai trò 'anon' thực hiện quyền DELETE.");
+        } else {
+            alert(`Đã gửi lệnh xoá thành công cho lớp ${cls}. Nếu dữ liệu vẫn còn, vui lòng kiểm tra lại quyền RLS trên Supabase.`);
+            updateDashboard(); // Cập nhật lại giao diện
+        }
+    } catch (err) {
+        console.error("Hệ thống gặp sự cố khi xoá:", err);
+        alert("Đã xảy ra sự cố không mong muốn khi thực hiện lệnh xoá.");
+    }
 }
-document.getElementById('logout-btn').onclick = () => location.reload();
+window.deleteResultsByClass = deleteResultsByClass;
+
+async function deleteResultById(id, name) {
+    if (!supabaseClient) {
+        alert("Supabase chưa được kết nối. Không thể xoá dữ liệu.");
+        return;
+    }
+
+    const confirmed = confirm(`Bạn có chắc chắn muốn xoá VĨNH VIỄN kết quả của học sinh "${name}"? Thao tác này sẽ xoá trực tiếp trên Máy chủ (Supabase) và không thể hoàn tác.`);
+    if (!confirmed) return;
+
+    try {
+        const { error, status } = await supabaseClient
+            .from('quiz_results')
+            .delete()
+            .eq('id', id);
+
+        if (error) {
+            console.error("Lỗi Xoá Cá Nhân:", error);
+            alert(`Lỗi Server (${error.code}): ${error.message}\n\nHãy kiểm tra lại quyền DELETE trong RLS Policy của Supabase.`);
+        } else if (status === 403 || status === 401) {
+            alert("Lỗi 403: Lệnh xoá bị từ chối bởi Supabase. Bạn cần cấp quyền DELETE cho table 'quiz_results' đối với role 'anon'.");
+        } else {
+            alert(`Đã gửi lệnh xoá thành công cho "${name}".`);
+            updateDashboard(); // Refresh current view
+        }
+    } catch (err) {
+        console.error("Hệ thống gặp sự cố khi xoá cá nhân:", err);
+        alert("Đã xảy ra sự cố không mong muốn khi thực hiện lệnh xoá.");
+    }
+}
+window.deleteResultById = deleteResultById;
