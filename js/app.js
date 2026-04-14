@@ -685,10 +685,6 @@ function setupAntiCheat() {
     document.addEventListener('visibilitychange', () => {
         if (currentState.view === 'quiz' && document.visibilityState === 'hidden') {
             currentState.violations++;
-            document.getElementById('cheat-warning').classList.remove('hidden');
-            document.getElementById('violation-count').textContent = currentState.violations;
-            if (currentState.violations >= 3) { submitQuiz(); showAlert('Vi phạm quá 3 lần. Hệ thống tự động nộp bài!'); }
-            else showAlert(`CẢNH BÁO: Không được rời khỏi tab thi! (${currentState.violations}/3)`);
         }
     });
 }
